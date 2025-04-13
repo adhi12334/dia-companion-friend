@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 interface VoiceVisualizerProps {
   isActive: boolean;
-  emotion?: 'happy' | 'thinking' | 'listening' | 'idle';
+  emotion?: 'happy' | 'thinking' | 'listening' | 'idle' | 'empathetic' | 'excited';
 }
 
 const VoiceVisualizer = ({ isActive, emotion = 'idle' }: VoiceVisualizerProps) => {
@@ -14,10 +14,23 @@ const VoiceVisualizer = ({ isActive, emotion = 'idle' }: VoiceVisualizerProps) =
     const generateBars = () => {
       const barCount = 5;
       if (isActive) {
-        // When active, have dynamic heights
-        return Array.from({ length: barCount }, () => 
-          Math.floor(Math.random() * 70) + 30
-        );
+        // When active, have dynamic heights based on emotion
+        if (emotion === 'excited') {
+          // More extreme heights for excitement
+          return Array.from({ length: barCount }, () => 
+            Math.floor(Math.random() * 80) + 40
+          );
+        } else if (emotion === 'empathetic') {
+          // Gentler waves for empathy
+          return Array.from({ length: barCount }, () => 
+            Math.floor(Math.random() * 50) + 40
+          );
+        } else {
+          // Standard active heights
+          return Array.from({ length: barCount }, () => 
+            Math.floor(Math.random() * 70) + 30
+          );
+        }
       } else {
         // When inactive, all bars at a low height
         return Array.from({ length: barCount }, () => 20);
@@ -32,23 +45,27 @@ const VoiceVisualizer = ({ isActive, emotion = 'idle' }: VoiceVisualizerProps) =
         // Reset to idle state if not already
         setVisualizerBars(generateBars());
       }
-    }, 150);
+    }, emotion === 'excited' ? 100 : 150); // Faster updates for excited state
     
     // Initialize bars
     setVisualizerBars(generateBars());
     
     return () => clearInterval(interval);
-  }, [isActive]);
+  }, [isActive, emotion]);
   
   // Different animations and colors based on emotion
   const getEmotionStyles = () => {
     switch(emotion) {
       case 'happy':
         return 'bg-green-400';
+      case 'excited':
+        return 'bg-purple-400 animate-pulse';
       case 'thinking':
         return 'bg-amber-400';
       case 'listening':
         return 'bg-dia animate-pulse-soft';
+      case 'empathetic':
+        return 'bg-blue-400';
       default:
         return 'bg-dia';
     }

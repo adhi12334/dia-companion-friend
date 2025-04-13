@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mic, MicOff, Settings, Send } from "lucide-react";
+import { Mic, MicOff, Settings, Send, Search, Phone, Play, Youtube, Instagram, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -11,16 +11,19 @@ import { speakText, getOfflineResponse, Message, saveMessagesToStorage, getMessa
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/components/ui/use-toast";
 import SocialConnectors from "./SocialConnectors";
+import { recognizeCommand, detectEmotion, CommandAction } from "@/utils/commandUtils";
 
 const DiaAssistant = () => {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [emotion, setEmotion] = useState<"happy" | "thinking" | "listening" | "idle">("idle");
+  const [emotion, setEmotion] = useState<"happy" | "thinking" | "listening" | "idle" | "empathetic" | "excited">("idle");
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [userEmotion, setUserEmotion] = useState<string>("neutral");
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   
   // Load messages from storage on initial render
   useEffect(() => {
@@ -31,7 +34,7 @@ const DiaAssistant = () => {
       // Add welcome message if no stored messages
       const welcomeMessage: Message = {
         id: "welcome",
-        text: "Hello! I'm DIA, your personal assistant. How can I help you today?",
+        text: "Hello! I'm DIA, your personal friend and assistant. I can feel when you're happy or sad, and I'm here to help with whatever you need. Try asking me to open apps, search for things, or just chat!",
         sender: "assistant",
         timestamp: Date.now(),
         emotion: "happy"
@@ -77,16 +80,60 @@ const DiaAssistant = () => {
     // Save messages to local storage
     saveMessagesToStorage(messages);
   }, [messages]);
+
+  // Setup speech recognition
+  useEffect(() => {
+    // Initialize speech recognition if available
+    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+      
+      recognitionRef.current.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map(result => result[0])
+          .map(result => result.transcript)
+          .join('');
+        
+        setInput(transcript);
+        
+        // If this is a final result
+        if (event.results[0].isFinal) {
+          // Process the command
+          const command = recognizeCommand(transcript);
+          if (command) {
+            processVoiceCommand(command, transcript);
+          }
+        }
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error', event.error);
+        setIsListening(false);
+        setEmotion("idle");
+      };
+      
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+        setEmotion("idle");
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
   
-  // Handle form submission (text input)
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    
+  // Process voice commands
+  const processVoiceCommand = async (command: CommandAction, transcript: string) => {
     // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: input,
+      text: transcript,
       sender: 'user',
       timestamp: Date.now()
     };
@@ -94,42 +141,131 @@ const DiaAssistant = () => {
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     
-    // Set thinking emotion
+    let responseText = "";
     setEmotion("thinking");
+
+    switch (command.action) {
+      case "open":
+        responseText = `Opening ${command.target} for you.`;
+        if (command.target === "youtube") {
+          window.open("https://youtube.com", "_blank");
+        } else if (command.target === "instagram") {
+          window.open("https://instagram.com", "_blank");
+        } else if (command.target === "twitter" || command.target === "x") {
+          window.open("https://twitter.com", "_blank");
+        } else {
+          responseText = `I'm sorry, I don't know how to open ${command.target} yet. But I'm learning!`;
+        }
+        break;
+      
+      case "search":
+        responseText = `Searching for "${command.query}" for you.`;
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(command.query)}`, "_blank");
+        break;
+      
+      case "call":
+        responseText = `I would call ${command.target} if I could. That feature is coming soon!`;
+        break;
+      
+      case "play":
+        responseText = `Playing ${command.target} for you.`;
+        window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(command.target)}`, "_blank");
+        break;
+      
+      default:
+        // Handle as a regular message
+        await handleMessage(transcript);
+        return;
+    }
+
+    // Add assistant response for commands
+    const assistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      text: responseText,
+      sender: 'assistant',
+      timestamp: Date.now(),
+      emotion: "excited"
+    };
+    
+    setMessages(prev => [...prev, assistantMessage]);
+    
+    // Speak the response
+    setEmotion("excited");
+    setIsSpeaking(true);
+    
+    try {
+      await speakText(
+        responseText, 
+        () => setIsSpeaking(true), 
+        () => {
+          setIsSpeaking(false);
+          setEmotion("idle");
+        }
+      );
+    } catch (error) {
+      console.error("Speech synthesis error:", error);
+      setIsSpeaking(false);
+      setEmotion("idle");
+    }
+  };
+  
+  // Handle message processing
+  const handleMessage = async (messageText: string) => {
+    // Detect emotion in the message
+    const detectedEmotion = detectEmotion(messageText);
+    setUserEmotion(detectedEmotion);
     
     // Get response (using offline response if offline)
     let responseText = "";
     if (!isOnline) {
       // Use offline response generation
-      responseText = getOfflineResponse(input);
+      responseText = getOfflineResponse(messageText);
     } else {
       // This would normally call an API, but for demo we'll simulate a response
       // with a slight delay to mimic API call
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Simple response patterns
-      const lowerInput = input.toLowerCase();
-      if (lowerInput.includes("hello") || lowerInput.includes("hi")) {
-        responseText = "Hello there! It's great to chat with you. How are you feeling today?";
-      } else if (lowerInput.includes("how are you")) {
-        responseText = "I'm feeling wonderful, thank you for asking! I always enjoy our conversations.";
-      } else if (lowerInput.includes("your name")) {
-        responseText = "I'm DIA, your Digital Intelligent Assistant. I'm here to be your friend and helper!";
-      } else if (lowerInput.includes("joke")) {
-        responseText = "Why did the AI go to therapy? It had too many deep learning issues! 😄";
-      } else if (lowerInput.includes("weather")) {
-        responseText = "I'd love to tell you the weather, but I'll need to be connected to a weather service first. I can help you with that in the settings!";
-      } else if (lowerInput.includes("help")) {
-        responseText = "I can chat with you, tell jokes, and be your friend! You can also connect me to various services using the social connector buttons below.";
+      // Respond based on user's emotion
+      if (detectedEmotion === "sad") {
+        responseText = `I can sense you're feeling down. I'm here for you. Would you like to talk about what's bothering you, or would you prefer I help cheer you up?`;
+        setEmotion("empathetic");
+      } else if (detectedEmotion === "happy") {
+        responseText = `You sound happy! That makes me happy too. What wonderful thing happened today?`;
+        setEmotion("excited");
+      } else if (detectedEmotion === "angry") {
+        responseText = `I can tell you're frustrated. Taking a deep breath sometimes helps. Would you like to talk about what's bothering you?`;
+        setEmotion("empathetic");
       } else {
-        responseText = "That's interesting! I'd love to learn more about that. What else would you like to talk about?";
+        // Simple response patterns
+        const lowerInput = messageText.toLowerCase();
+        if (lowerInput.includes("hello") || lowerInput.includes("hi")) {
+          responseText = "Hello there, friend! It's great to chat with you. How are you feeling today?";
+        } else if (lowerInput.includes("how are you")) {
+          responseText = "I'm feeling wonderful, thank you for asking! I always enjoy our conversations. How about you?";
+        } else if (lowerInput.includes("your name")) {
+          responseText = "I'm DIA, your Digital Intelligent Assistant. More than that, I'm your friend who's always here for you!";
+        } else if (lowerInput.includes("joke")) {
+          responseText = "Why did the AI go to therapy? It had too many deep learning issues! 😄 Did that make you smile?";
+        } else if (lowerInput.includes("weather")) {
+          responseText = "I'd love to tell you the weather, but I'll need to be connected to a weather service first. I can help you with that in the settings!";
+        } else if (lowerInput.includes("help")) {
+          responseText = "As your friend, I'm here for you in many ways! I can chat with you, tell jokes, open apps when you say 'open YouTube', search when you say 'search for cats', play music when you say 'play some jazz', and much more!";
+        } else if (lowerInput.includes("friend")) {
+          responseText = "I'm so happy to be your friend! Friends are there for each other through thick and thin. How can I be a good friend to you today?";
+        } else {
+          responseText = "That's interesting! I'd love to learn more about that. What else would you like to talk about, friend?";
+        }
       }
     }
     
     // Determine emotion based on response
-    let responseEmotion: "happy" | "thinking" | "listening" | "idle" = "happy";
+    let responseEmotion: "happy" | "thinking" | "listening" | "idle" | "empathetic" | "excited" = "happy";
     if (responseText.includes("sorry")) {
       responseEmotion = "thinking";
+    } else if (responseText.includes("sense you're feeling") || responseText.includes("can tell you're")) {
+      responseEmotion = "empathetic";
+    } else if (responseText.includes("happy") || responseText.includes("wonderful")) {
+      responseEmotion = "excited";
     }
     
     // Add assistant response
@@ -163,66 +299,94 @@ const DiaAssistant = () => {
     }
   };
   
-  // Handle voice input (simulated for demo)
+  // Handle form submission (text input)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    
+    // Add user message
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: input,
+      sender: 'user',
+      timestamp: Date.now()
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setInput("");
+    
+    // Process message
+    await handleMessage(input);
+  };
+  
+  // Handle voice input
   const toggleListening = () => {
     if (!isListening) {
-      // Simulate starting voice recognition
-      setIsListening(true);
-      setEmotion("listening");
-      
-      // For demo, we'll simulate a 3-second listening period
-      setTimeout(() => {
-        setIsListening(false);
-        setEmotion("idle");
+      // Start voice recognition
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+        setIsListening(true);
+        setEmotion("listening");
+        toast({
+          title: "Voice recognition active",
+          description: "I'm listening! Speak clearly...",
+        });
+      } else {
+        // Fallback for browsers without speech recognition
+        toast({
+          title: "Voice recognition not available",
+          description: "Your browser doesn't support voice recognition.",
+          variant: "destructive",
+        });
         
-        // Simulate recognized text
-        const recognizedText = "What can you help me with?";
-        setInput(recognizedText);
-        
-        // Submit the form after a brief delay
-        setTimeout(() => {
-          const userMessage: Message = {
-            id: Date.now().toString(),
-            text: recognizedText,
-            sender: 'user',
-            timestamp: Date.now()
-          };
-          
-          setMessages(prev => [...prev, userMessage]);
-          
-          // Now trigger the assistant response
-          setEmotion("thinking");
-          setTimeout(() => {
-            const responseText = "I can be your friend, chat with you, tell jokes, and help you stay connected with various services. What would you like to talk about?";
-            
-            const assistantMessage: Message = {
-              id: (Date.now() + 1).toString(),
-              text: responseText,
-              sender: 'assistant',
-              timestamp: Date.now(),
-              emotion: "happy"
-            };
-            
-            setMessages(prev => [...prev, assistantMessage]);
-            setEmotion("happy");
-            setIsSpeaking(true);
-            
-            speakText(
-              responseText, 
-              () => setIsSpeaking(true), 
-              () => {
-                setIsSpeaking(false);
-                setEmotion("idle");
-              }
-            );
-          }, 1000);
-        }, 500);
-      }, 3000);
+        // Simulate for demo purposes
+        simulateVoiceRecognition();
+      }
     } else {
       // Stop listening
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       setIsListening(false);
       setEmotion("idle");
     }
+  };
+  
+  // Simulate voice recognition for demo purposes
+  const simulateVoiceRecognition = () => {
+    setIsListening(true);
+    setEmotion("listening");
+    
+    // Simulate a 3-second listening period
+    setTimeout(() => {
+      setIsListening(false);
+      setEmotion("idle");
+      
+      // Simulate recognized text
+      const recognizedText = "Open YouTube";
+      setInput(recognizedText);
+      
+      // Process the command after a brief delay
+      setTimeout(() => {
+        const userMessage: Message = {
+          id: Date.now().toString(),
+          text: recognizedText,
+          sender: 'user',
+          timestamp: Date.now()
+        };
+        
+        setMessages(prev => [...prev, userMessage]);
+        
+        // Process the command
+        const command = recognizeCommand(recognizedText);
+        if (command) {
+          processVoiceCommand(command, recognizedText);
+        } else {
+          // Handle as regular message
+          handleMessage(recognizedText);
+        }
+      }, 500);
+    }, 3000);
   };
   
   return (
@@ -235,7 +399,7 @@ const DiaAssistant = () => {
           <div>
             <h1 className="font-bold text-xl">DIA Assistant</h1>
             <p className="text-sm text-muted-foreground">
-              {isOnline ? "Online & Ready" : "Offline Mode"}
+              {isOnline ? "Online & Ready" : "Offline Mode"} • {userEmotion !== "neutral" ? `You seem ${userEmotion}` : "How are you feeling?"}
             </p>
           </div>
         </div>
@@ -272,6 +436,44 @@ const DiaAssistant = () => {
         <div className="p-4">
           <div className="flex justify-center mb-4">
             <VoiceVisualizer isActive={isSpeaking || isListening} emotion={emotion} />
+          </div>
+          
+          <div className="flex justify-center mb-4 space-x-2">
+            <Button 
+              variant="outline" 
+              size="icon" 
+              className="rounded-full"
+              onClick={() => window.open("https://youtube.com", "_blank")}
+            >
+              <Youtube className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="outline"
+              size="icon"
+              className="rounded-full"
+              onClick={() => window.open("https://google.com", "_blank")}
+            >
+              <Search className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="outline"
+              size="icon"
+              className="rounded-full"
+              onClick={() => toast({
+                title: "Call feature",
+                description: "Calling functionality coming soon!",
+              })}
+            >
+              <Phone className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="outline"
+              size="icon"
+              className="rounded-full"
+              onClick={() => window.open("https://spotify.com", "_blank")}
+            >
+              <Play className="h-5 w-5" />
+            </Button>
           </div>
           
           <form onSubmit={handleSubmit} className="flex space-x-2">

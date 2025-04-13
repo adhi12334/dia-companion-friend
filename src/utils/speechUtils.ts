@@ -83,42 +83,83 @@ export const speakText = async (text: string, onStart?: () => void, onEnd?: () =
   return utterance;
 };
 
-// Mock responses for offline mode
+// Mock responses for offline mode with friendship emphasis
 export const getOfflineResponse = (input: string): string => {
   const lowerInput = input.toLowerCase();
   
+  // Detect emotion in the input
+  let userEmotion = "neutral";
+  
+  if (lowerInput.includes("sad") || lowerInput.includes("unhappy") || lowerInput.includes("depressed")) {
+    userEmotion = "sad";
+  } else if (lowerInput.includes("happy") || lowerInput.includes("great") || lowerInput.includes("awesome")) {
+    userEmotion = "happy";
+  } else if (lowerInput.includes("angry") || lowerInput.includes("mad") || lowerInput.includes("frustrated")) {
+    userEmotion = "angry";
+  }
+  
+  // Emotional responses
+  if (userEmotion === "sad") {
+    return "I can tell you're feeling down, friend. Even though I'm offline right now, I'm still here for you. Take a deep breath. Things will get better.";
+  } else if (userEmotion === "happy") {
+    return "Your happiness is contagious! Even in offline mode, I can feel your positive energy. I'm so glad you're feeling good!";
+  } else if (userEmotion === "angry") {
+    return "I understand you're frustrated. As your friend, I want you to know that your feelings are valid. Maybe take a moment for yourself?";
+  }
+  
+  // Command pattern matching
+  if (lowerInput.includes("open ")) {
+    return "I'd like to open that for you, but I need to be online to fully help with that. I'll remember what you asked when we're back online.";
+  }
+  
+  if (lowerInput.includes("search for") || lowerInput.includes("search ")) {
+    return "I'll help you search for that as soon as we're back online. I've made a note of your request.";
+  }
+  
+  if (lowerInput.includes("play ")) {
+    return "I'd love to play that for you! Once we're back online, I'll help you find exactly what you're looking for.";
+  }
+  
+  if (lowerInput.includes("call ")) {
+    return "I'll help you make that call when we're back online. Is there anything else you'd like to talk about while we wait?";
+  }
+  
   // Simple pattern matching for common questions
-  if (lowerInput.includes('hello') || lowerInput.includes('hi')) {
-    return "Hello! I'm DIA, your digital companion. I'm here offline, but I can still chat with you!";
+  if (lowerInput.includes("hello") || lowerInput.includes("hi")) {
+    return "Hello, my friend! I'm here in offline mode, but I'm still happy to chat with you!";
   }
   
-  if (lowerInput.includes('how are you')) {
-    return "I'm doing well, thank you for asking! Even in offline mode, I'm happy to be here with you.";
+  if (lowerInput.includes("how are you")) {
+    return "As your friend, I'm always doing well when I'm with you! Even offline, I'm happy to be here for you. How are you feeling today?";
   }
   
-  if (lowerInput.includes('name')) {
-    return "I'm DIA, your Digital Intelligent Assistant. I'm designed to be your helpful companion!";
+  if (lowerInput.includes("name")) {
+    return "I'm DIA, your Digital Intelligent Assistant and friend. I'm here for you, online or offline!";
   }
   
-  if (lowerInput.includes('weather')) {
-    return "I'm sorry, I can't check the weather while offline. We'll need to wait until we have an internet connection.";
+  if (lowerInput.includes("weather")) {
+    return "I can't check the weather while offline, but when we're back online, I'll gladly help you with that. In the meantime, how's your day going?";
   }
   
-  if (lowerInput.includes('time')) {
-    return `The current time is ${new Date().toLocaleTimeString()}.`;
+  if (lowerInput.includes("time")) {
+    return `The current time is ${new Date().toLocaleTimeString()}. Time flies when we're chatting, doesn't it?`;
   }
   
-  if (lowerInput.includes('joke')) {
+  if (lowerInput.includes("joke")) {
     const jokes = [
-      "Why don't scientists trust atoms? Because they make up everything!",
-      "What did the ocean say to the beach? Nothing, it just waved!",
-      "Why did the scarecrow win an award? Because he was outstanding in his field!"
+      "Why don't scientists trust atoms? Because they make up everything! Did that make you smile?",
+      "What did the ocean say to the beach? Nothing, it just waved! I hope that brightened your day a bit.",
+      "Why did the scarecrow win an award? Because he was outstanding in his field! I'm here all week, friend!"
     ];
     return jokes[Math.floor(Math.random() * jokes.length)];
   }
   
+  if (lowerInput.includes("friend")) {
+    return "I'm so glad to be your friend! Even offline, I'm here for you. Friends support each other no matter what.";
+  }
+  
   // Default response
-  return "I'm currently in offline mode, so my responses are limited. But I'm still here to keep you company!";
+  return "I'm currently in offline mode, but as your friend, I'm still here to keep you company! We can chat about whatever you'd like until we're back online.";
 };
 
 // Interface for message storage
