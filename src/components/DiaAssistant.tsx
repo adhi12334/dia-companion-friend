@@ -12,6 +12,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/components/ui/use-toast";
 import SocialConnectors from "./SocialConnectors";
 import { recognizeCommand, detectEmotion, CommandAction } from "@/utils/commandUtils";
+import { shouldProcessWakeWord, saveWakeWordSettings, getWakeWordSettings, registerAutoStart } from "@/utils/backgroundUtils";
 
 const DiaAssistant = () => {
   const [input, setInput] = useState("");
@@ -21,9 +22,19 @@ const DiaAssistant = () => {
   const [emotion, setEmotion] = useState<"happy" | "thinking" | "listening" | "idle" | "empathetic" | "excited">("idle");
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [userEmotion, setUserEmotion] = useState<string>("neutral");
+  const [isWakingEnabled, setIsWakingEnabled] = useState(getWakeWordSettings());
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const backgroundRecognitionRef = useRef<SpeechRecognition | null>(null);
+  
+  // Attempt to register for auto-start on boot when component first loads
+  useEffect(() => {
+    const autoStartRegistered = registerAutoStart();
+    if (autoStartRegistered) {
+      console.log("DIA will start automatically on device boot");
+    }
+  }, []);
   
   // Load messages from storage on initial render
   useEffect(() => {
@@ -81,7 +92,65 @@ const DiaAssistant = () => {
     saveMessagesToStorage(messages);
   }, [messages]);
 
-  // Setup speech recognition
+  // Setup wake word detection for background listening
+  useEffect(() => {
+    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      
+      // Initialize wake word detection
+      backgroundRecognitionRef.current = new SpeechRecognition();
+      backgroundRecognitionRef.current.continuous = true;
+      backgroundRecognitionRef.current.interimResults = false;
+      backgroundRecognitionRef.current.lang = 'en-US';
+      
+      backgroundRecognitionRef.current.onresult = (event) => {
+        const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+        
+        // Check if the wake word "DIA" is detected
+        if ((transcript.includes("dia") || 
+             transcript.includes("dee ah") || 
+             transcript.includes("dee-ah")) && 
+            shouldProcessWakeWord()) {
+          // Wake word detected, acknowledge and start active listening
+          handleWakeWordDetected();
+        }
+      };
+      
+      backgroundRecognitionRef.current.onend = () => {
+        // Restart background listening if it's still enabled
+        if (isWakingEnabled && !isListening) {
+          try {
+            backgroundRecognitionRef.current?.start();
+          } catch (e) {
+            console.log("Background recognition already started");
+          }
+        }
+      };
+      
+      // Start background listening if waking is enabled
+      if (isWakingEnabled) {
+        try {
+          backgroundRecognitionRef.current.start();
+          console.log("Background listening started");
+        } catch (e) {
+          console.error("Error starting background recognition:", e);
+        }
+      }
+    }
+    
+    return () => {
+      // Cleanup background recognition
+      if (backgroundRecognitionRef.current) {
+        try {
+          backgroundRecognitionRef.current.abort();
+        } catch (e) {
+          console.error("Error stopping background recognition:", e);
+        }
+      }
+    };
+  }, [isWakingEnabled, isListening]);
+
+  // Setup main speech recognition
   useEffect(() => {
     // Initialize speech recognition if available
     if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
@@ -118,6 +187,15 @@ const DiaAssistant = () => {
       recognitionRef.current.onend = () => {
         setIsListening(false);
         setEmotion("idle");
+        
+        // Resume background listening when active listening ends
+        if (isWakingEnabled && backgroundRecognitionRef.current) {
+          try {
+            backgroundRecognitionRef.current.start();
+          } catch (e) {
+            console.log("Background recognition already started");
+          }
+        }
       };
     }
 
@@ -127,6 +205,54 @@ const DiaAssistant = () => {
       }
     };
   }, []);
+  
+  // Handle wake word detection
+  const handleWakeWordDetected = () => {
+    // Stop background listening
+    if (backgroundRecognitionRef.current) {
+      try {
+        backgroundRecognitionRef.current.stop();
+      } catch (e) {
+        console.log("Background recognition already stopped");
+      }
+    }
+    
+    // Play acknowledgment sound or speak response
+    speakText("Yes, I'm here. How can I help you?");
+    
+    // Show toast notification
+    toast({
+      title: "DIA activated",
+      description: "I'm listening and ready to assist you.",
+    });
+    
+    // Add assistant message
+    const assistantMessage: Message = {
+      id: Date.now().toString(),
+      text: "Yes, I'm here. How can I help you?",
+      sender: 'assistant',
+      timestamp: Date.now(),
+      emotion: "excited"
+    };
+    
+    setMessages(prev => [...prev, assistantMessage]);
+    
+    // Start active listening
+    startActiveListening();
+  };
+  
+  // Start active listening for commands
+  const startActiveListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        setEmotion("listening");
+      } catch (e) {
+        console.error("Error starting active recognition:", e);
+      }
+    }
+  };
   
   // Process voice commands
   const processVoiceCommand = async (command: CommandAction, transcript: string) => {
@@ -322,6 +448,15 @@ const DiaAssistant = () => {
   // Handle voice input
   const toggleListening = () => {
     if (!isListening) {
+      // If we're starting listening, stop background recognition
+      if (backgroundRecognitionRef.current) {
+        try {
+          backgroundRecognitionRef.current.stop();
+        } catch (e) {
+          console.log("Background recognition already stopped");
+        }
+      }
+      
       // Start voice recognition
       if (recognitionRef.current) {
         recognitionRef.current.start();
@@ -349,6 +484,52 @@ const DiaAssistant = () => {
       }
       setIsListening(false);
       setEmotion("idle");
+      
+      // Resume background listening when active listening ends
+      if (isWakingEnabled && backgroundRecognitionRef.current) {
+        try {
+          backgroundRecognitionRef.current.start();
+        } catch (e) {
+          console.log("Background recognition already started");
+        }
+      }
+    }
+  };
+  
+  // Toggle wake word detection
+  const toggleWakeWordDetection = () => {
+    const newState = !isWakingEnabled;
+    setIsWakingEnabled(newState);
+    
+    // Save this setting
+    saveWakeWordSettings(newState);
+    
+    if (newState) {
+      // Enable wake word detection
+      if (backgroundRecognitionRef.current && !isListening) {
+        try {
+          backgroundRecognitionRef.current.start();
+          toast({
+            title: "Wake word detection enabled",
+            description: "Say 'DIA' to activate voice assistant.",
+          });
+        } catch (e) {
+          console.error("Error starting background recognition:", e);
+        }
+      }
+    } else {
+      // Disable wake word detection
+      if (backgroundRecognitionRef.current) {
+        try {
+          backgroundRecognitionRef.current.stop();
+          toast({
+            title: "Wake word detection disabled",
+            description: "Manual activation required.",
+          });
+        } catch (e) {
+          console.error("Error stopping background recognition:", e);
+        }
+      }
     }
   };
   
@@ -400,10 +581,16 @@ const DiaAssistant = () => {
             <h1 className="font-bold text-xl">DIA Assistant</h1>
             <p className="text-sm text-muted-foreground">
               {isOnline ? "Online & Ready" : "Offline Mode"} • {userEmotion !== "neutral" ? `You seem ${userEmotion}` : "How are you feeling?"}
+              {isWakingEnabled && " • Wake word enabled"}
             </p>
           </div>
         </div>
-        <Button variant="ghost" size="icon">
+        <Button 
+          variant="ghost" 
+          size="icon"
+          onClick={toggleWakeWordDetection}
+          className={isWakingEnabled ? "bg-dia/20" : ""}
+        >
           <Settings className="h-5 w-5" />
         </Button>
       </div>
