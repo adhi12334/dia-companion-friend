@@ -45,3 +45,15 @@ interface SpeechRecognitionAlternative {
 interface SpeechRecognitionErrorEvent extends Event {
   error: string;
 }
+
+// Capacitor related types for mobile functionality 
+declare interface Capacitor {
+  isPluginAvailable(name: string): boolean;
+  getPlatform(): 'web' | 'android' | 'ios';
+}
+
+declare interface CapacitorGlobal {
+  Capacitor: Capacitor;
+}
+
+interface Window extends CapacitorGlobal {}
